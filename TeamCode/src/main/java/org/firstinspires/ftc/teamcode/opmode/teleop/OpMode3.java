@@ -7,7 +7,7 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.teamcode.common.hardware.RobotHardware;
 
-//test
+//test github permission
 @TeleOp(name = "OpMode3")
 @Disabled
 public class OpMode3 extends LinearOpMode {
