@@ -1,10 +1,12 @@
 package org.firstinspires.ftc.teamcode.opmode.teleop;
 
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 
 @TeleOp(name = "Turret Calibration", group = "Calibration")
+@Disabled
 public class TurretCalibration extends LinearOpMode {
 
     private DcMotor turret = null;

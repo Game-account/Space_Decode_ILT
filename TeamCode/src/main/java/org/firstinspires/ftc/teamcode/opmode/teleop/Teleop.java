@@ -15,6 +15,7 @@ import com.arcrobotics.ftclib.hardware.motors.Motor;
 import com.qualcomm.hardware.limelightvision.LLResult;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
@@ -34,6 +35,7 @@ import org.firstinspires.ftc.teamcode.common.hardware.BotCoefficients;
 import com.qualcomm.robotcore.hardware.TouchSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
 @TeleOp
+@Disabled
 public class Teleop extends LinearOpMode {
 
     private ElapsedTime runtime = new ElapsedTime();
@@ -68,6 +70,7 @@ public class Teleop extends LinearOpMode {
     private boolean aimbotEnabled = true;
 
     @Override
+
     public void runOpMode() throws InterruptedException {
 
         frontLeft = hardwareMap.dcMotor.get("fl");
@@ -75,8 +78,8 @@ public class Teleop extends LinearOpMode {
         backLeft = hardwareMap.dcMotor.get("bl");
         backRight = hardwareMap.dcMotor.get("br");
 
-        Fly = hardwareMap.dcMotor.get("Fly");
-        Intake = hardwareMap.dcMotor.get("Intake");
+        Fly = hardwareMap.dcMotor.get("fly");
+        Intake = hardwareMap.dcMotor.get("in");
         Indexer = hardwareMap.servo.get("Indexer");
         Turret = hardwareMap.dcMotor.get("Turret");
         upperblocker = hardwareMap.servo.get("upblocker");

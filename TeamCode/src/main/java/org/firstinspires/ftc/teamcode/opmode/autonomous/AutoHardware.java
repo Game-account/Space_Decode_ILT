@@ -60,6 +60,8 @@ public abstract class AutoHardware extends LinearOpMode {
     private double hogback_target_rpm = HOGBACK_TARGET_INIT_RPM;
     private double hogback_target_ticks = hogback_target_rpm * TICKS_PER_REVOLUTION / 60;
     private double hogback_target_ticks_low = (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60;
+    private ElapsedTime revtime = new ElapsedTime();
+    private double minrevtime = 3000;
 
 
     // For motot encoders
@@ -468,13 +470,16 @@ public abstract class AutoHardware extends LinearOpMode {
         switch (launchState) {
             case IDLE:
                 if (bShootRequested) {
+                    revtime.reset();
                     launchState = LAUNCH_STATES.SPIN_UP;
+
                 }
                 break;
             case SPIN_UP:
                 if (bShootRequested) {
-                    if (hogback.getVelocity() > hogback_target_ticks_low) {
+                    if (hogback.getVelocity() > hogback_target_ticks_low || revtime.milliseconds() > minrevtime) {
                         launchState = LAUNCH_STATES.LAUNCH;
+
                     }
                 }
                 break;
@@ -482,12 +487,14 @@ public abstract class AutoHardware extends LinearOpMode {
                 launchState = LAUNCH_STATES.LAUNCHING;
                 trigger.setPosition(TRIGGER_SHOOT);
                 triggerShootTimer.reset();
+
                 break;
             case LAUNCHING:
                 if (triggerShootTimer.seconds() > TRIGGER_SHOOT_TIME) {
                     launchState = LAUNCH_STATES.LAUNCHED;
                     trigger.setPosition(TRIGGER_READY);
                     triggerReadyTimer.reset();
+
                 }
                 break;
             case LAUNCHED:

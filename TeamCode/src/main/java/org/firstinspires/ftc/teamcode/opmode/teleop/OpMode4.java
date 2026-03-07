@@ -32,7 +32,7 @@ public class OpMode4 extends OpMode {
     RobotHardware4 robot = new RobotHardware4();
 
     final double FEED_TIME_SECONDS = 0.5;
-    final double STOP_SPEED = 0.0;
+    final double STOP_SPEED = -300;
     final double FULL_SPEED = -1;
 
     static final double INTAKE_POWER_INTAKE = -0.8;
@@ -54,6 +54,7 @@ public class OpMode4 extends OpMode {
     private double hogback_target_rpm = HOGBACK_TARGET_INIT_RPM;
     private double hogback_target_ticks = hogback_target_rpm * TICKS_PER_REVOLUTION / 60;
     private double hogback_target_ticks_low= (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60;
+    private final double minrpmshoot = 1000 * TICKS_PER_REVOLUTION / 60;
 
 
     private DcMotor leftFrontDrive, rightFrontDrive, leftBackDrive, rightBackDrive;
@@ -87,6 +88,7 @@ public class OpMode4 extends OpMode {
         IDLE,
         SPIN_UP,
         LAUNCH,
+        REVERSE,
         LAUNCHING,  // trigger SHOOT state
         LAUNCHED,   // trigger back to READY
     }
@@ -124,7 +126,7 @@ public class OpMode4 extends OpMode {
         hogback.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         hogback.setPIDFCoefficients(
                 DcMotor.RunMode.RUN_USING_ENCODER,
-                new PIDFCoefficients(300, 0, 0, 10)
+                new PIDFCoefficients(350, 0.1, 0, 12)
         );
         hogbackSpeedChangeTimer.reset();
 
@@ -170,9 +172,9 @@ public class OpMode4 extends OpMode {
     @Override
     public void loop() {
 
-        double horizontal = -1.0 * gamepad1.right_stick_x * 0.6;
-        double vertical = gamepad1.right_stick_y * 0.6;
-        double turn = -1.0 * gamepad1.left_stick_x * 0.6;
+        double horizontal = -1.0 * gamepad1.left_stick_x * 0.6;
+        double vertical = gamepad1.left_stick_y * 0.6;
+        double turn = -1.0 * gamepad1.right_stick_x * 0.6;
 
         //double tx = LimelightHelpers.getTX("limelight");
         // boolean hasTarget = LimelightHelpers.hasTarget("limelight");
@@ -236,14 +238,14 @@ public class OpMode4 extends OpMode {
 */
 
 //hogback control
-        if (gamepad2.y) {
+        if (gamepad1.right_trigger>0.05) {
             bShootRequested = true;
         }
-        else if (gamepad2.a) {
+        else if (gamepad1.right_bumper) {
             bShootRequested = false;
         }
         // TODOs
-        else if (gamepad2.b) {
+        else if (gamepad1.y) {
             // telemetry.addLine("x is pressed");
             if (hogbackSpeedChangeTimer.seconds() > SPEED_CHANGE_TIME) {
                 hogbackSpeedChangeTimer.reset();
@@ -254,7 +256,7 @@ public class OpMode4 extends OpMode {
             hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
                     (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
         }
-        else if (gamepad2.x){
+        else if (gamepad1.a){
             // telemetry.addLine("b is pressed");
             if (hogbackSpeedChangeTimer.seconds() > SPEED_CHANGE_TIME) {
                 hogbackSpeedChangeTimer.reset();
@@ -264,10 +266,19 @@ public class OpMode4 extends OpMode {
                     hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
             hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
                     (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
-        }else if(gamepad2.dpad_right){
+        }else if(gamepad1.b){
             if (hogbackSpeedChangeTimer.seconds() > SPEED_CHANGE_TIME) {
                 hogbackSpeedChangeTimer.reset();
                 hogback_target_rpm = 5350;
+            }
+            hogback_target_ticks = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
+                    hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
+            hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
+                    (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
+        }else if (gamepad1.x){
+            if (hogbackSpeedChangeTimer.seconds() > SPEED_CHANGE_TIME) {
+                hogbackSpeedChangeTimer.reset();
+                hogback_target_rpm = 5100;
             }
             hogback_target_ticks = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
                     hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
@@ -281,27 +292,30 @@ public class OpMode4 extends OpMode {
 // Left bumper: start intake motor, pusher0, pusher1
 // Right bumper: reverse intake motor, pusher0, pusher1
 // Left trigger: stop intake motor, pusher0, pusher1
-        if (gamepad2.left_bumper) {
+        if (gamepad1.left_trigger > 0.05) {
             telemetry.addLine("left bumper is pressed. Start intake subsystem");
             intake.setPower(INTAKE_POWER_INTAKE);
         }
-        else if (gamepad2.right_bumper) {
+        /*
+        else if (gamepad1.right_bumper) {
             telemetry.addLine("right bumper is pressed. Reverse intake subsystem");
             intake.setPower(INTAKE_POWER_PUSHOUT);
         }
-        else if (gamepad2.left_trigger > 0.5) {
+
+         */
+        else if (gamepad1.left_bumper) {
             telemetry.addLine("stop intake subsystem");
             intake.setPower(0);
         }
 
         // trigger to shoot.
         //  Automatically make trigger ready after TRIGGER_SHOOT_TIME
-        if (gamepad2.dpad_up){
+        if (gamepad1.dpad_up && hogback.getVelocity() > minrpmshoot){
             telemetry.addLine("dpad up is pressed");
             trigger.setPosition(TRIGGER_SHOOT);
             triggerTimer.reset();
         }
-        if (gamepad2.dpad_down || triggerTimer.seconds() > TRIGGER_SHOOT_TIME){
+        if (gamepad1.dpad_down || triggerTimer.seconds() > TRIGGER_SHOOT_TIME){
             telemetry.addLine("dpad down is pressed OR timeout");
             trigger.setPosition(TRIGGER_READY);
         }

@@ -11,7 +11,7 @@ public class Blue_Near_3_Leave_Base extends AutoHardware  {
     // Motor encoder parameter
     double ticksPerInch = 31.3;
     double ticksPerDegree = 15.6;
-    double hogback_rpm_near = 5100;  // Rotations Per Minute
+    double hogback_rpm_near = 4300;  // Rotations Per Minute
 
     public Blue_Near_3_Leave_Base() {
     }
