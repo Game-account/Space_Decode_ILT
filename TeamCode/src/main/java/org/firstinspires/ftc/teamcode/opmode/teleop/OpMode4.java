@@ -54,48 +54,35 @@ public class OpMode4 extends OpMode {
     private double hogback_target_rpm = HOGBACK_TARGET_INIT_RPM;
     private double hogback_target_ticks = hogback_target_rpm * TICKS_PER_REVOLUTION / 60;
     private double hogback_target_ticks_low= (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60;
-    private final double minrpmshoot = 1000 * TICKS_PER_REVOLUTION / 60;
 
 
     private DcMotor leftFrontDrive, rightFrontDrive, leftBackDrive, rightBackDrive;
-    private DcMotor intake;
-
-    private CRServo pusher0;
-    private CRServo pusher1;
+    private DcMotor intake, transport;
 
     private Servo trigger;
     static final double TRIGGER_READY = 0.15;
     static final double TRIGGER_SHOOT = 0.55;
     private DcMotorEx hogback;
-    private Limelight3A limelight;
 
     private IMU imu;
 
-    private AprilTagProcessor aprilTagProcessor;
-    private VisionPortal visionPortal;
+    final double transport_power=0.7;
 
-    private List<AprilTagDetection> detectedTags = new ArrayList<>();
-
-    ElapsedTime triggerTimer = new ElapsedTime();
-    static final double TRIGGER_SHOOT_TIME = 0.4;
 
     ElapsedTime hogbackSpeedChangeTimer = new ElapsedTime();
     static final double SPEED_CHANGE_TIME = 0.2; // seconds
 
-    int maxShots = 0;
+    boolean spin;
 
     public enum LaunchState {
         IDLE,
         SPIN_UP,
         LAUNCH,
-        REVERSE,
-        LAUNCHING,  // trigger SHOOT state
-        LAUNCHED,   // trigger back to READY
     }
     // 🔹 UPDATED STATE MACHINE
 
     private LaunchState launchState;
-    private boolean bShootRequested = false;
+    private boolean ShootRequested = false;
 
     @Override
     public void init() {
@@ -105,7 +92,7 @@ public class OpMode4 extends OpMode {
         leftBackDrive = hardwareMap.get(DcMotor.class, "bl");
         rightBackDrive = hardwareMap.get(DcMotor.class, "br");
         intake = hardwareMap.get(DcMotor.class, "in");
-        trigger = hardwareMap.get(Servo.class, "arm2");
+        transport = hardwareMap.get(DcMotor.class, "trans");
         hogback = hardwareMap.get(DcMotorEx.class, "fly");
 
         rightFrontDrive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -154,14 +141,6 @@ public class OpMode4 extends OpMode {
                 RevHubOrientationOnRobot.UsbFacingDirection.BACKWARD);
         imu.initialize(new IMU.Parameters(orientationOnRobot));
 
-        aprilTagProcessor = new AprilTagProcessor.Builder()
-                .setDrawTagID(true)
-                .setDrawTagOutline(true)
-                .setDrawAxes(true)
-                .setDrawCubeProjection(true)
-                .setOutputUnits(DistanceUnit.CM, AngleUnit.DEGREES)
-                .build();
-
 //        VisionPortal.Builder builder = new VisionPortal.Builder();
 //        builder.setCameraResolution(new Size(640, 480));
 //        builder.addProcessor(aprilTagProcessor);
@@ -202,59 +181,18 @@ public class OpMode4 extends OpMode {
             rightBackDrive.setPower(brPower);
         }
 
-
-
-//limelight
-        // --- Limelight Logic (Replaces your while loop) ---
-        /*
-        LLResult result = limelight.getLatestResult();
-        if (result != null && result.isValid()) {
-            Pose3D botpose = result.getBotpose();
-            telemetry.addData("tx", result.getTx());
-            telemetry.addData("ty", result.getTy());
-            telemetry.addData("Botpose", botpose !=null ? botpose.toString(): "null");
-        }
-        // Sending numbers to Python
-        double[] inputs = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
-        limelight.updatePythonInputs(inputs);
-
-        // Getting numbers from Python
-        double[] pythonOutputs = result.getPythonOutput();
-        if (pythonOutputs != null && pythonOutputs.length > 0) {
-            telemetry.addData("Python output:", pythonOutputs[0]);
-        }
-
-        // First, tell Limelight which way your robot is facing
-        double robotYaw = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES);
-        limelight.updateRobotOrientation(robotYaw);
-        if (result != null && result.isValid()) {
-            Pose3D botpose_mt2 = result.getBotpose_MT2();
-            if (botpose_mt2 != null) {
-                double x = botpose_mt2.getPosition().x;
-                double y = botpose_mt2.getPosition().y;
-                telemetry.addData("MT2 Location:", "(" + x + ", " + y + ")");
-            }
-        }
-*/
-
-//hogback control
         if (gamepad1.right_trigger>0.05) {
-            bShootRequested = true;
-        }
-        else if (gamepad1.right_bumper) {
-            bShootRequested = false;
+            spin=true;
+        }else if (gamepad1.right_bumper) {
+            spin=false;
         }
         // TODOs
-        else if (gamepad1.y) {
+        if (gamepad1.y) {
             // telemetry.addLine("x is pressed");
             if (hogbackSpeedChangeTimer.seconds() > SPEED_CHANGE_TIME) {
                 hogbackSpeedChangeTimer.reset();
                 hogback_target_rpm += 100;
             }
-            hogback_target_ticks = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                    hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
-            hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                    (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
         }
         else if (gamepad1.a){
             // telemetry.addLine("b is pressed");
@@ -262,31 +200,23 @@ public class OpMode4 extends OpMode {
                 hogbackSpeedChangeTimer.reset();
                 hogback_target_rpm -= 100;
             }
-            hogback_target_ticks = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                    hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
-            hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                    (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
         }else if(gamepad1.b){
             if (hogbackSpeedChangeTimer.seconds() > SPEED_CHANGE_TIME) {
                 hogbackSpeedChangeTimer.reset();
                 hogback_target_rpm = 5350;
             }
-            hogback_target_ticks = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                    hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
-            hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                    (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
         }else if (gamepad1.x){
             if (hogbackSpeedChangeTimer.seconds() > SPEED_CHANGE_TIME) {
                 hogbackSpeedChangeTimer.reset();
                 hogback_target_rpm = 5100;
             }
-            hogback_target_ticks = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                    hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
-            hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                    (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
         }
+        hogback_target_ticks = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
+                hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
+        hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
+                (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
 
-        launch(bShootRequested);
+        launch(spin);
 
 // intake & transfer subsystems synchronized action
 // Left bumper: start intake motor, pusher0, pusher1
@@ -296,132 +226,62 @@ public class OpMode4 extends OpMode {
             telemetry.addLine("left bumper is pressed. Start intake subsystem");
             intake.setPower(INTAKE_POWER_INTAKE);
         }
-        /*
-        else if (gamepad1.right_bumper) {
-            telemetry.addLine("right bumper is pressed. Reverse intake subsystem");
-            intake.setPower(INTAKE_POWER_PUSHOUT);
-        }
+//        else if (gamepad1.right_bumper) {
+//            telemetry.addLine("right bumper is pressed. Reverse intake subsystem");
+//            intake.setPower(INTAKE_POWER_PUSHOUT);
+//        }
 
-         */
         else if (gamepad1.left_bumper) {
             telemetry.addLine("stop intake subsystem");
             intake.setPower(0);
         }
 
-        // trigger to shoot.
-        //  Automatically make trigger ready after TRIGGER_SHOOT_TIME
-        if (gamepad1.dpad_up && hogback.getVelocity() > minrpmshoot){
-            telemetry.addLine("dpad up is pressed");
-            trigger.setPosition(TRIGGER_SHOOT);
-            triggerTimer.reset();
-        }
-        if (gamepad1.dpad_down || triggerTimer.seconds() > TRIGGER_SHOOT_TIME){
-            telemetry.addLine("dpad down is pressed OR timeout");
-            trigger.setPosition(TRIGGER_READY);
-        }
 
 //hogback launch state
         telemetry.addData("State", launchState);
         telemetry.addData("Hogback Velocity Target (RPM)", hogback_target_rpm);
         telemetry.addData("Hogback Velocity Actual (RPM)",
                 hogback.getVelocity() / TICKS_PER_REVOLUTION * 60);
-}
-
-
-    public void update() {
-        detectedTags = aprilTagProcessor.getDetections();
     }
 
-    public List<AprilTagDetection> getDetectedTags() {
-        return detectedTags;
-    }
 
-    public void displayedDetectionTelemetry(AprilTagDetection detectedId) {
-        if (detectedId == null) {
-            return;
-        }
-
-        if (detectedId.metadata != null) {
-            telemetry.addLine(String.format("\n==== (ID %d) %s", detectedId.id, detectedId.metadata.name));
-            telemetry.addLine(String.format("XYZ %6.1f %6.1f %6.1f (inch)", detectedId.ftcPose.x, detectedId.ftcPose.y, detectedId.ftcPose.z));
-            telemetry.addLine(String.format("PRY %6.1f %6.1f %6.1f (deg)", detectedId.ftcPose.pitch, detectedId.ftcPose.roll, detectedId.ftcPose.yaw));
-            telemetry.addLine(String.format("RBE %6.1f %6.1f %6.1f (inch, deg, deg)", detectedId.ftcPose.range, detectedId.ftcPose.bearing, detectedId.ftcPose.elevation));
-        } else {
-            telemetry.addLine(String.format("\n====(ID %d) Unknown", detectedId.id));
-            telemetry.addLine(String.format("Center %6.0f %6.0f (pixels)", detectedId.center.x, detectedId.center.y));
-        }
-    }
-
-    // A stops hogback
-
-
-    void launch(boolean shotRequested) {
-
-
+    void launch(boolean spin) {
         switch (launchState) {
             case IDLE:
-                if (shotRequested) {
+                if (spin) {
                     launchState = LaunchState.SPIN_UP;
                 }
                 break;
             case SPIN_UP:
-                if (shotRequested) {
+                if (ShootRequested) {
                     if (hogback.getVelocity() > hogback_target_ticks_low) {
                         launchState = LaunchState.LAUNCH;
                     }
                 }
-                else {
+                if(!spin) {
                     launchState = LaunchState.IDLE;
                     hogback.setVelocity(STOP_SPEED);
                 }
                 break;
             case LAUNCH:
-                if (!bShootRequested) {
+                if (!spin) {
                     launchState = LaunchState.IDLE;
                     hogback.setVelocity(STOP_SPEED);
                 }
+                // trigger to shoot.
+                //  Automatically make trigger ready after TRIGGER_SHOOT_TIME
+                if (gamepad1.dpad_up && hogback.getVelocity() > hogback_target_ticks_low){
+                    telemetry.addLine("dpad up is pressed");
+                    transport.setPower(transport_power);
+                }
+                if (gamepad1.dpad_down){
+                    telemetry.addLine("dpad down");
+                    transport.setPower(0);
+                }
                 break;
-       }
-        if (bShootRequested) {
+        }
+        if (ShootRequested) {
             hogback.setVelocity(hogback_target_ticks);
         }
     }
-
-
-
-//    public AprilTagDetection getTagBySpecificId(int id) {
-//        for (AprilTagDetection detection : detectedTags) {
-//            if (detection.id == id) {
-//                return detection;
-//
-//            }
-//        }
-//        return null;
-//
-//    }
-//
-//
-//    public void stop() {
-//        if (visionPortal != null) {
-//            visionPortal.close();
-//        }
-//    }
 }
-
-
-
-
-// Right bumper jogs feeders for 0.1s
-//        if (gamepad1.right_bumper && launchState == LaunchState.IDLE) {
-//            feederTimer.reset();
-//            leftFeeder.setPower(BUMPER_FEED_POWER);
-//            rightFeeder.setPower(BUMPER_FEED_POWER);
-//            launchState = LaunchState.JOG_FEEDER;
-//        }
-
-// launch(maxShots > 0);
-
-//        telemetry.addData("State", launchState);
-//        telemetry.addData("Hogback Velocity", hogback.getVelocity());
-//
-
