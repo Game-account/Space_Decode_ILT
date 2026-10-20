@@ -20,6 +20,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
 //import org.firstinspires.ftc.robotcore.external.tfod.Recognition;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
+import org.firstinspires.ftc.vision.apriltag.AprilTagSingleDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 //import org.firstinspires.ftc.vision.tfod.TfodProcessor;
 
@@ -303,7 +304,12 @@ public abstract class AutoCommon extends LinearOpMode {
             idSeen = 0;
             // Step through the list of detections and display info for each one.
 
-            for (AprilTagDetection detection : currentDetections) {
+            for (AprilTagDetection rawDetection : currentDetections) {
+                // This routine targets individual tag IDs, not tag clusters.
+                if (!(rawDetection instanceof AprilTagSingleDetection)) {
+                    continue;
+                }
+                AprilTagSingleDetection detection = (AprilTagSingleDetection) rawDetection;
 
                 idSeen = detection.id;
 /*

@@ -1,113 +1,72 @@
 package org.firstinspires.ftc.teamcode.common.hardware;
 
-
-import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.hardware.Servo;
-import com.qualcomm.robotcore.hardware.CRServo;
 
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.AngularVelocity;
 import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
 
-
 public class RobotHardware4 {
-    /* Declare OpMode members. */
-    HardwareMap hwMap =  null;
+    HardwareMap hwMap = null;
 
-    // Define Motor and Servo objects  (Make them private so they can't be accessed externally)
-    public DcMotor motorfl = null;
-    public DcMotor motorfr = null;
-    public DcMotor motorbr = null;
-
-    public DcMotor motorbl = null;
-
-    public DcMotor intake = null;
-
-    public Limelight3A limelight;
-
-  //  public DcMotor hogback = null;
-
-
-
-
-    //  public CRServo flyWheell = null;
-   //  public CRServo flyWheelr = null;
-
-
-
+    public DcMotor motorfl;
+    public DcMotor motorfr;
+    public DcMotor motorbl;
+    public DcMotor motorbr;
+    public DcMotor intake;
+    public DcMotor transport;
+    public DcMotorEx hogback;
     public IMU imu;
 
-    // Initial robot orientation
+    public static final double TRIGGER_READY = 0.15;
+    public static final double TRIGGER_SHOOT = 0.55;
+
+    // Initial robot orientation.
     public YawPitchRollAngles orientation0;
     public AngularVelocity angularVelocity0;
     public double yaw0;
 
-    // Define a constructor that allows the OpMode to pass a reference to itself.
     public RobotHardware4() {}
 
-    /**
-     * Initialize all the robot's hardware.
-     * This method must be called ONCE when the OpMode is initialized.
-     *
-     * All of the hardware devices are accessed via the hardware map, and initialized.
-     */
-    public void init(HardwareMap ahwMap)    {
-        // save reference to hardware map
+    /** Initialize the robot hardware once when the OpMode is initialized. */
+    public void init(HardwareMap ahwMap) {
         hwMap = ahwMap;
 
-        // Define and Initialize Motors (note: need to use reference to actual OpMode).
-        motorfl = hwMap.get(DcMotor.class, "motorfl");
-        motorfr = hwMap.get(DcMotor.class, "motorfr");
-        motorbl = hwMap.get(DcMotor.class, "motorbl");
-        motorbr = hwMap.get(DcMotor.class, "motorbr");
-        intake = hwMap.get(DcMotor.class, "intake");
-        limelight = hwMap.get(Limelight3A.class, "limelight");
-      //            OK I'm enjoying hearing the conviction that I like that conviction like well. OK whatever that's OK in certain cases not a good idea expansion had to was missing at start up robot restart required for hub operation.  hogback = hwMap.get(DcMotor.class, "hogback");
+        motorfl = hwMap.get(DcMotor.class, "fl");
+        motorfr = hwMap.get(DcMotor.class, "fr");
+        motorbl = hwMap.get(DcMotor.class, "bl");
+        motorbr = hwMap.get(DcMotor.class, "br");
+        intake = hwMap.get(DcMotor.class, "in");
+        transport = hwMap.get(DcMotor.class, "trans");
+        hogback = hwMap.get(DcMotorEx.class, "fly");
 
-
-
-        //  flyWheell = hwMap.get(CRServo.class, "flyWheell");
-       // flyWheelr = hwMap.get(CRServo.class, "flyWheelr");
-
-
-
-
-
-
-        // set Brake zero power behavior
         motorfr.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         motorfl.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         motorbr.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         motorbl.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        motorfl.setDirection(DcMotor.Direction.REVERSE);
+        motorbr.setDirection(DcMotor.Direction.REVERSE);
+        transport.setDirection(DcMotorSimple.Direction.REVERSE);
+
+        intake.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        intake.setDirection(DcMotor.Direction.REVERSE);
         intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
-        motorfr.setDirection(DcMotor.Direction.REVERSE);
-        motorbr.setDirection(DcMotor.Direction.REVERSE);
-        intake.setDirection(DcMotor.Direction.REVERSE);
+        // Flywheel owns velocity tuning; keep this mapped motor stopped until configured.
+        hogback.setPower(0.0);
 
-
-
-        //motorbr.setDirection(DcMotor.Direction.REVERSE);
-
-
-
-        // If there are encoders connected, switch to RUN_USING_ENCODER mode for greater accuracy
-        setDrivetrainMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-
-
-        // Initialize IMU in the control hub
-        RevHubOrientationOnRobot.LogoFacingDirection logoDirection = RevHubOrientationOnRobot.LogoFacingDirection.UP;
-        RevHubOrientationOnRobot.UsbFacingDirection  usbDirection  = RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
-        RevHubOrientationOnRobot orientationOnRobot = new RevHubOrientationOnRobot(logoDirection, usbDirection);
         imu = hwMap.get(IMU.class, "imu");
+        RevHubOrientationOnRobot orientationOnRobot = new RevHubOrientationOnRobot(
+                RevHubOrientationOnRobot.LogoFacingDirection.UP,
+                RevHubOrientationOnRobot.UsbFacingDirection.BACKWARD);
         imu.initialize(new IMU.Parameters(orientationOnRobot));
-        imu.resetYaw();
 
-        // Retrieve the very initial Rotational Angles and Velocities
         orientation0 = imu.getRobotYawPitchRollAngles();
         angularVelocity0 = imu.getRobotAngularVelocity(AngleUnit.DEGREES);
         yaw0 = orientation0.getYaw(AngleUnit.DEGREES);
