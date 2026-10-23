@@ -19,6 +19,9 @@ public class Flywheel {
         // Change this value if the motor or gearing changes.
         public static final double ENCODER_TICKS_PER_FLYWHEEL_REV = 28.0;
         public static final double DEFAULT_RPM = 5100.0;
+        public static final double AUTONOMOUS_DEFAULT_RPM = 3200.0;
+        public static final double AUTONOMOUS_CLOSE_RPM = 2900.0;
+        public static final double AUTONOMOUS_SPINUP_TIMEOUT_SECONDS = 3.0;
         public static final double NEAR_RPM = 5100.0;
         public static final double FAR_RPM = 5350.0;
         public static final double MAX_RPM = 6000.0;
@@ -70,8 +73,12 @@ public class Flywheel {
 
     /** RobotHardware4.init(hardwareMap) must have been called before constructing this. */
     public Flywheel(RobotHardware4 robot) {
-        this(Objects.requireNonNull(robot, "robot").hogback,
-                () -> System.nanoTime() / 1_000_000_000.0);
+        this(Objects.requireNonNull(robot, "robot").hogback);
+    }
+
+    /** Reuse a motor already mapped by an autonomous hardware class. */
+    public Flywheel(DcMotorEx motor) {
+        this(motor, () -> System.nanoTime() / 1_000_000_000.0);
     }
 
     // Inject a motor and monotonic clock for tests without operating real hardware.

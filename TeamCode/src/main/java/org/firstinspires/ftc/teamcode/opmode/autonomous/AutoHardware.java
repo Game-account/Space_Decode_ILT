@@ -7,7 +7,6 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.IMU;
-import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
@@ -18,6 +17,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
+import org.firstinspires.ftc.teamcode.opmode.teleop.Flywheel;
 
 
 public abstract class AutoHardware extends LinearOpMode {
@@ -41,7 +41,7 @@ public abstract class AutoHardware extends LinearOpMode {
     static final double INTAKE_POWER_PUSHOUT = 0.8;
     static final double PUSHER_POWER_INTAKE = -0.8;
     static final double PUSHER_POWER_PUSHOUT = 0.8;
-    final double HOGBACK_TARGET_INIT_RPM = 3200;    // RPM: Rotations Per Minute
+    final double HOGBACK_TARGET_INIT_RPM = Flywheel.Config.AUTONOMOUS_DEFAULT_RPM;    // RPM: Rotations Per Minute
 
     static final double TRIGGER_SHOOT_TIME = 0.4;
     static final double TRIGGER_READY_TIME = 5;
@@ -52,16 +52,16 @@ public abstract class AutoHardware extends LinearOpMode {
 
 
     final double STOP_SPEED = 0.0;
-    static final double TICKS_PER_REVOLUTION = 28.0;
+    static final double TICKS_PER_REVOLUTION = Flywheel.Config.ENCODER_TICKS_PER_FLYWHEEL_REV;
 
-    final double HOGBACK_TARGET_RANGE = 80;
-    static final double MAX_TICKS_PER_SEC = 2800.0;
+    final double HOGBACK_TARGET_RANGE = Flywheel.Config.READY_TOLERANCE_RPM;
+    static final double MAX_TICKS_PER_SEC = Flywheel.Config.MAX_RPM * TICKS_PER_REVOLUTION / 60.0;
 
     private double hogback_target_rpm = HOGBACK_TARGET_INIT_RPM;
     private double hogback_target_ticks = hogback_target_rpm * TICKS_PER_REVOLUTION / 60;
     private double hogback_target_ticks_low = (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60;
     private ElapsedTime revtime = new ElapsedTime();
-    private double minrevtime = 3000;
+    private double minrevtime = Flywheel.Config.AUTONOMOUS_SPINUP_TIMEOUT_SECONDS * 1000.0;
 
 
     // For motot encoders
@@ -81,6 +81,7 @@ public abstract class AutoHardware extends LinearOpMode {
 
     private Servo trigger;
     private DcMotorEx hogback;
+    private Flywheel flywheel;
     private Limelight3A limelight;
 
     private DcMotor intake;
@@ -161,7 +162,7 @@ public abstract class AutoHardware extends LinearOpMode {
         // trigger servo
         trigger = hardwareMap.get(Servo.class, "arm2");
         // hogback motor with DocMotorEx so that PIDF can be used.
-        hogback = hardwareMap.get(DcMotorEx.class, "fly");
+        initFlywheel();
 
         frontrightDrive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         frontleftDrive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -173,15 +174,6 @@ public abstract class AutoHardware extends LinearOpMode {
         intake.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         intake.setDirection(DcMotor.Direction.REVERSE);
 
-        // Set hogback motor to run with ENCODER and set PID coefficients
-        hogback.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
-        hogback.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        hogback.setDirection(DcMotor.Direction.REVERSE);
-        hogback.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        hogback.setPIDFCoefficients(
-                DcMotor.RunMode.RUN_USING_ENCODER,
-                new PIDFCoefficients(300, 0, 0, 10)
-        );
         hogbackSpeedChangeTimer.reset();
         triggerShootTimer.reset();
         triggerReadyTimer.reset();
@@ -514,11 +506,11 @@ public abstract class AutoHardware extends LinearOpMode {
                 break;
         }
         if (bShootRequested) {
-            hogback.setVelocity(hogback_target_ticks);
+            startFlywheel();
         }
         else {
             launchState = LAUNCH_STATES.IDLE;
-            hogback.setVelocity(STOP_SPEED);
+            stopFlywheel();
         }
         telemetry.addData("State", launchState);
         telemetry.addData("Hogback Velocity Target (RPM)", hogback_target_rpm);
@@ -533,10 +525,16 @@ public abstract class AutoHardware extends LinearOpMode {
     public void triggerShoot(int numShots) {
         bShootRequested = true;
         countShots = 0;
-        while (opModeIsActive()) {
-            launch(numShots);
-            if (!bShootRequested)
-                break;
+        try {
+            while (opModeIsActive()) {
+                launch(numShots);
+                if (!bShootRequested) {
+                    break;
+                }
+                idle();
+            }
+        } finally {
+            stopFlywheel();
         }
     }
 
@@ -544,22 +542,185 @@ public abstract class AutoHardware extends LinearOpMode {
         if (trigger != null) trigger.setPosition(position);
     }
 
-    // Hogback / shooter controls
-    public void setHogbackTargetRpm(double target_rpm) {
-        hogback_target_rpm = target_rpm;
-        hogback_target_ticks = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                hogback_target_rpm * TICKS_PER_REVOLUTION / 60));
-        hogback_target_ticks_low = Math.max(0, Math.min(MAX_TICKS_PER_SEC,
-                (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60));
+    // Autonomous flywheel helpers. These do not operate the intake, transfer, or trigger.
+
+    /** Initialize only the flywheel, or use initAll() to initialize the existing full robot. */
+    public void initFlywheel() {
+        if (flywheel == null) {
+            hogback = hardwareMap.get(DcMotorEx.class, "fly");
+            flywheel = new Flywheel(hogback);
+            setFlywheelTargetRpm(HOGBACK_TARGET_INIT_RPM);
+        }
+    }
+
+    /** Set a bounded RPM without starting an idle wheel. Safe to call before waitForStart(). */
+    public void setFlywheelTargetRpm(double rpm) {
+        Flywheel controller = requireFlywheel();
+        controller.setTargetRpm(rpm);
+        hogback_target_rpm = controller.getTargetRpm();
+        hogback_target_ticks = hogback_target_rpm * TICKS_PER_REVOLUTION / 60.0;
+        hogback_target_ticks_low = Math.max(0.0,
+                (hogback_target_rpm - HOGBACK_TARGET_RANGE) * TICKS_PER_REVOLUTION / 60.0);
+        if (!opModeIsActive()) {
+            controller.stop();
+        }
+        controller.update();
+    }
+
+    /** Start at the selected RPM without waiting for spin-up. Call after waitForStart(). */
+    public boolean startFlywheel() {
+        Flywheel controller = requireFlywheel();
+        if (!opModeIsActive()) {
+            stopFlywheel();
+            return false;
+        }
+        controller.start();
+        updateFlywheel();
+        return controller.isRunning();
+    }
+
+    /** Select an RPM and start without blocking; true means a nonzero speed was commanded. */
+    public boolean startFlywheel(double rpm) {
+        setFlywheelTargetRpm(rpm);
+        return startFlywheel();
+    }
+
+    /** Refresh measured RPM/readiness and add telemetry; call telemetry.update() to transmit it. */
+    public void updateFlywheel() {
+        Flywheel controller = requireFlywheel();
+        if (!opModeIsActive()) {
+            controller.stop();
+        }
+        controller.update();
+        telemetry.addData("Flywheel State", controller.getState());
+        telemetry.addData("Flywheel Target (RPM)", "%.0f", controller.getTargetRpm());
+        telemetry.addData("Flywheel Actual (RPM)", "%.0f", controller.getActualRpm());
+    }
+
+    public boolean waitForFlywheelReady() {
+        return waitForFlywheelReady(Flywheel.Config.AUTONOMOUS_SPINUP_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Wait for stable RPM, leaving the wheel running on success.
+     * Returns false and stops on timeout, STOP, interruption, or an idle wheel.
+     * A zero timeout performs one immediate readiness check without waiting.
+     */
+    public boolean waitForFlywheelReady(double timeoutSeconds) {
+        validateFlywheelDuration(timeoutSeconds);
+        Flywheel controller = requireFlywheel();
+        boolean ready = false;
+        try {
+            double started = flywheelTimeSeconds();
+            while (opModeIsActive() && controller.isRunning()) {
+                updateFlywheel();
+                telemetry.update();
+                if (!opModeIsActive()) {
+                    return false;
+                }
+                double elapsed = flywheelTimeSeconds() - started;
+                if (controller.isReady() && (timeoutSeconds == 0.0 || elapsed <= timeoutSeconds)) {
+                    ready = true;
+                    return true;
+                }
+                if (elapsed >= timeoutSeconds) {
+                    return false;
+                }
+                idle();
+            }
+            return false;
+        } finally {
+            if (!ready) {
+                stopFlywheel();
+            }
+        }
+    }
+
+    /**
+     * Run for a duration measured from the start command, including spin-up, then stop.
+     * Returns false if STOP/interruption occurs. Does not start or move other mechanisms.
+     * To start timing at operating speed, call startFlywheel()/waitForFlywheelReady() first.
+     */
+    public boolean runFlywheelFor(double rpm, double durationSeconds) {
+        validateFlywheelDuration(durationSeconds);
+        if (!Double.isFinite(rpm)) {
+            throw new IllegalArgumentException("Flywheel RPM must be finite");
+        }
+        requireFlywheel();
+        try {
+            if (durationSeconds == 0.0) {
+                return opModeIsActive();
+            }
+            if (!startFlywheel(rpm)) {
+                return false;
+            }
+            double started = flywheelTimeSeconds();
+            while (opModeIsActive()) {
+                if (flywheelTimeSeconds() - started >= durationSeconds) {
+                    return true;
+                }
+                updateFlywheel();
+                telemetry.update();
+                idle();
+            }
+            return false;
+        } finally {
+            stopFlywheel();
+        }
+    }
+
+    /** Command zero output, preserve the selected RPM, and cancel a legacy shooting request. */
+    public void stopFlywheel() {
+        if (flywheel != null) {
+            flywheel.stop();
+        }
+        bShootRequested = false;
+        launchState = LAUNCH_STATES.IDLE;
+    }
+
+    public boolean isFlywheelReady() {
+        return requireFlywheel().isReady();
+    }
+
+    public double getFlywheelTargetRpm() {
+        return requireFlywheel().getTargetRpm();
+    }
+
+    /** Measured RPM from the most recent updateFlywheel(), wait, or timed run. */
+    public double getFlywheelActualRpm() {
+        return requireFlywheel().getActualRpm();
+    }
+
+    protected double flywheelTimeSeconds() {
+        return System.nanoTime() / 1_000_000_000.0;
+    }
+
+    private Flywheel requireFlywheel() {
+        if (flywheel == null) {
+            throw new IllegalStateException("Call initFlywheel() or initAll() before flywheel commands");
+        }
+        return flywheel;
+    }
+
+    private static void validateFlywheelDuration(double seconds) {
+        if (!Double.isFinite(seconds) || seconds < 0.0) {
+            throw new IllegalArgumentException("Flywheel duration must be finite and nonnegative");
+        }
+    }
+
+    // Existing autonomous routines can keep using the legacy method names.
+    public void setHogbackTargetRpm(double rpm) {
+        setFlywheelTargetRpm(rpm);
     }
 
     public void setHogbackTargetRpmClose() {
-        this.hogback_target_rpm = 2900;
+        setFlywheelTargetRpm(Flywheel.Config.AUTONOMOUS_CLOSE_RPM);
     }
 
     public double getHogbackTargetRpm() {
-        return hogback_target_rpm;
+        return getFlywheelTargetRpm();
     }
+
 
 
 }

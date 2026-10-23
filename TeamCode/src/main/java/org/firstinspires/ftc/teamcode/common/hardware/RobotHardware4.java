@@ -54,8 +54,8 @@ public class RobotHardware4 {
         motorbr.setDirection(DcMotor.Direction.REVERSE);
         transport.setDirection(DcMotorSimple.Direction.REVERSE);
 
+
         intake.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        intake.setDirection(DcMotor.Direction.REVERSE);
         intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
         // Flywheel owns velocity tuning; keep this mapped motor stopped until configured.
