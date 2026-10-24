@@ -14,7 +14,7 @@ public class Teleop extends OpMode {
     @Override
     public void init() {
         robot.init(hardwareMap);
-        flywheel = new Flywheel(robot);
+        flywheel = new Flywheel(robot.hogback, hardwareMap);
         robot.transport.setPower(0.0);
         telemetry.addData("Status", "Initialized");
         telemetry.setMsTransmissionInterval(11);
@@ -61,6 +61,9 @@ public class Teleop extends OpMode {
         telemetry.addData("Flywheel State", flywheel.getState());
         telemetry.addData("Flywheel Target (RPM)", "%.0f", flywheel.getTargetRpm());
         telemetry.addData("Flywheel Actual (RPM)", "%.0f", flywheel.getActualRpm());
+        telemetry.addData("Shooter Battery", flywheel.hasValidBatteryVoltage()
+                ? String.format("%.2f V", flywheel.getBatteryVoltage()) : "Unavailable (holding F)");
+        telemetry.addData("Flywheel F", "%.2f", flywheel.getAppliedFeedforward());
         telemetry.addData("Flywheel Error (RPM)", "%.0f", flywheel.getErrorRpm());
         telemetry.update();
     }

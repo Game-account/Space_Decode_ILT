@@ -3,6 +3,8 @@ package org.firstinspires.ftc.teamcode.opmode.teleop;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.Gamepad;
+import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.hardware.VoltageSensor;
 
 import org.firstinspires.ftc.teamcode.common.hardware.RobotHardware4;
 
@@ -18,24 +20,35 @@ public class Flywheel {
         // RPM is measured at the flywheel. The existing 6000 RPM, 1:1 motor uses 28 ticks/rev.
         // Change this value if the motor or gearing changes.
         public static final double ENCODER_TICKS_PER_FLYWHEEL_REV = 28.0;
-        public static final double DEFAULT_RPM = 5100.0;
+        public static final double DEFAULT_RPM = 3500.0;
         public static final double AUTONOMOUS_DEFAULT_RPM = 3200.0;
         public static final double AUTONOMOUS_CLOSE_RPM = 2900.0;
         public static final double AUTONOMOUS_SPINUP_TIMEOUT_SECONDS = 3.0;
         public static final double NEAR_RPM = 5100.0;
         public static final double FAR_RPM = 5350.0;
         public static final double MAX_RPM = 6000.0;
-        public static final double RPM_STEP = 100.0;
+        public static final double RPM_STEP = 50.0;
 
         // Report READY after the wheel stays inside this speed band continuously.
         public static final double READY_TOLERANCE_RPM = 80.0;
         public static final double READY_STABLE_SECONDS = 0.15;
 
-        // Existing PIDF values are retained as a starting point; tune on the real robot.
+        // Flywheel PIDF tuning settings; tune on the real robot.
         public static final double PIDF_P = 350.0;
         public static final double PIDF_I = 0.1;
         public static final double PIDF_D = 0.0;
-        public static final double PIDF_F = 12.0;
+        public static final double PIDF_F = 0.0;
+
+        // PIDF_F is the feedforward tuned at this reference voltage. Only F is scaled:
+        // applied F = PIDF_F * (reference volts / measured battery volts).
+        // Keep the RPM target and feedback gains unchanged as the battery sags.
+        public static final double PIDF_REFERENCE_VOLTAGE = 12.0;
+        public static final double MIN_VALID_BATTERY_VOLTAGE = 6.0;
+        public static final double MAX_VALID_BATTERY_VOLTAGE = 14.0;
+        public static final double MIN_VOLTAGE_COMPENSATION = 0.75;
+        public static final double MAX_VOLTAGE_COMPENSATION = 1.50;
+        public static final double VOLTAGE_UPDATE_SECONDS = 0.10;
+        public static final double MIN_FEEDFORWARD_CHANGE = 0.05;
         public static final DcMotor.Direction MOTOR_DIRECTION = DcMotor.Direction.REVERSE;
         public static final DcMotor.ZeroPowerBehavior STOP_BEHAVIOR = DcMotor.ZeroPowerBehavior.FLOAT;
 
@@ -63,6 +76,10 @@ public class Flywheel {
 
     private final DcMotorEx motor;
     private final DoubleSupplier seconds;
+    private final DoubleSupplier voltage;
+    private double nextVoltageUpdateSeconds = Double.NEGATIVE_INFINITY;
+    private double batteryVoltage = Double.NaN;
+    private double appliedFeedforward = Double.NaN;
     private double targetRpm = clampRpm(Config.DEFAULT_RPM);
     private double actualRpm;
     private boolean enabled;
@@ -76,22 +93,32 @@ public class Flywheel {
         this(Objects.requireNonNull(robot, "robot").hogback);
     }
 
-    /** Reuse a motor already mapped by an autonomous hardware class. */
+    /** Read the configured hubs' battery sensors in TeleOp or autonomous. */
+    public Flywheel(DcMotorEx motor, HardwareMap hardwareMap) {
+        this(motor, () -> System.nanoTime() / 1_000_000_000.0,
+                batteryVoltageSource(hardwareMap));
+    }
+
+    /** Without a HardwareMap, retain nominal PIDF; prefer the voltage-aware constructor. */
     public Flywheel(DcMotorEx motor) {
         this(motor, () -> System.nanoTime() / 1_000_000_000.0);
     }
 
     // Inject a motor and monotonic clock for tests without operating real hardware.
     Flywheel(DcMotorEx motor, DoubleSupplier seconds) {
+        this(motor, seconds, () -> Double.NaN);
+    }
+
+    Flywheel(DcMotorEx motor, DoubleSupplier seconds, DoubleSupplier voltage) {
         this.motor = Objects.requireNonNull(motor, "Initialize RobotHardware4 before Flywheel");
         this.seconds = Objects.requireNonNull(seconds, "seconds");
+        this.voltage = Objects.requireNonNull(voltage, "voltage");
         motor.setPower(0.0);
         motor.setDirection(Config.MOTOR_DIRECTION);
         motor.setZeroPowerBehavior(Config.STOP_BEHAVIOR);
         motor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        motor.setVelocityPIDFCoefficients(Config.PIDF_P, Config.PIDF_I,
-                Config.PIDF_D, Config.PIDF_F);
+        updateVoltageCompensation();
         stop();
     }
 
@@ -126,6 +153,7 @@ public class Flywheel {
 
     /** Refresh the motor command and readiness. Also usable without gamepad controls. */
     public void update() {
+        updateVoltageCompensation();
         actualRpm = motor.getVelocity() * 60.0 / Config.ENCODER_TICKS_PER_FLYWHEEL_REV;
         if (!isRunning()) {
             stop();
@@ -182,6 +210,64 @@ public class Flywheel {
     public double getTargetRpm() { return targetRpm; }
     public double getActualRpm() { return actualRpm; }
     public double getErrorRpm() { return targetRpm - actualRpm; }
+    /** Most recent battery reading, or NaN when no valid reading was available. */
+    public double getBatteryVoltage() { return batteryVoltage; }
+    public boolean hasValidBatteryVoltage() { return Double.isFinite(batteryVoltage); }
+    public double getAppliedFeedforward() { return appliedFeedforward; }
+
+    private void updateVoltageCompensation() {
+        double now = seconds.getAsDouble();
+        if (now < nextVoltageUpdateSeconds) {
+            return;
+        }
+        nextVoltageUpdateSeconds = now + Config.VOLTAGE_UPDATE_SECONDS;
+        double reading = voltage.getAsDouble();
+        batteryVoltage = isValidBatteryVoltage(reading) ? reading : Double.NaN;
+
+        // A missing/bad reading must not divide by zero or produce invalid coefficients.
+        // Hold the last applied F; use nominal F until the first valid reading.
+        double feedforward = Double.isFinite(appliedFeedforward)
+                ? appliedFeedforward : Config.PIDF_F;
+        if (hasValidBatteryVoltage()) {
+            double scale = Math.max(Config.MIN_VOLTAGE_COMPENSATION,
+                    Math.min(Config.MAX_VOLTAGE_COMPENSATION,
+                            Config.PIDF_REFERENCE_VOLTAGE / batteryVoltage));
+            feedforward = Config.PIDF_F * scale;
+        }
+        // Avoid sending PIDF commands every loop or for tiny sensor fluctuations.
+        if (!Double.isFinite(appliedFeedforward)
+                || Math.abs(feedforward - appliedFeedforward) >= Config.MIN_FEEDFORWARD_CHANGE) {
+            motor.setVelocityPIDFCoefficients(Config.PIDF_P, Config.PIDF_I,
+                    Config.PIDF_D, feedforward);
+            appliedFeedforward = feedforward;
+        }
+    }
+
+    private static DoubleSupplier batteryVoltageSource(HardwareMap hardwareMap) {
+        Objects.requireNonNull(hardwareMap, "hardwareMap");
+        return () -> readBatteryVoltage(hardwareMap.voltageSensor);
+    }
+
+    // Use the lowest valid hub supply reading to account for sag under load.
+    static double readBatteryVoltage(Iterable<VoltageSensor> sensors) {
+        double lowest = Double.POSITIVE_INFINITY;
+        for (VoltageSensor sensor : sensors) {
+            try {
+                double reading = sensor.getVoltage();
+                if (isValidBatteryVoltage(reading)) {
+                    lowest = Math.min(lowest, reading);
+                }
+            } catch (RuntimeException unavailableSensor) {
+                // A disconnected sensor must not prevent using another healthy hub.
+            }
+        }
+        return Double.isFinite(lowest) ? lowest : Double.NaN;
+    }
+
+    private static boolean isValidBatteryVoltage(double voltage) {
+        return Double.isFinite(voltage) && voltage >= Config.MIN_VALID_BATTERY_VOLTAGE
+                && voltage <= Config.MAX_VALID_BATTERY_VOLTAGE;
+    }
 
     private void invalidateReadiness() {
         inToleranceSince = Double.NaN;

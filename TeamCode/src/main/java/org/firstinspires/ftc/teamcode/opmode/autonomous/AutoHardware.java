@@ -548,7 +548,7 @@ public abstract class AutoHardware extends LinearOpMode {
     public void initFlywheel() {
         if (flywheel == null) {
             hogback = hardwareMap.get(DcMotorEx.class, "fly");
-            flywheel = new Flywheel(hogback);
+            flywheel = new Flywheel(hogback, hardwareMap);
             setFlywheelTargetRpm(HOGBACK_TARGET_INIT_RPM);
         }
     }
@@ -595,6 +595,9 @@ public abstract class AutoHardware extends LinearOpMode {
         telemetry.addData("Flywheel State", controller.getState());
         telemetry.addData("Flywheel Target (RPM)", "%.0f", controller.getTargetRpm());
         telemetry.addData("Flywheel Actual (RPM)", "%.0f", controller.getActualRpm());
+        telemetry.addData("Shooter Battery", controller.hasValidBatteryVoltage()
+                ? String.format("%.2f V", controller.getBatteryVoltage()) : "Unavailable (holding F)");
+        telemetry.addData("Flywheel F", "%.2f", controller.getAppliedFeedforward());
     }
 
     public boolean waitForFlywheelReady() {
